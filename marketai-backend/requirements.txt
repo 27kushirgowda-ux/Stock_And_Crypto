@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+yfinance
+requests
+pandas
+numpy
+scikit-learn
+passlib[bcrypt]
+sqlalchemy
