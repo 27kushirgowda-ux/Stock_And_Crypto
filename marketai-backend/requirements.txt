@@ -7,3 +7,4 @@ numpy
 scikit-learn
 passlib[bcrypt]
 sqlalchemy
+psycopg2-binary
