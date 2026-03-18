@@ -25,7 +25,7 @@ app.add_middleware(
 )
 
 # -----------------------------
-# PASSWORD (FAST)
+# PASSWORD
 # -----------------------------
 pwd_context = CryptContext(
     schemes=["bcrypt"],
@@ -60,7 +60,6 @@ def home():
 # -----------------------------
 @app.post("/signup")
 def signup(user: UserSignup):
-
     db = SessionLocal()
 
     existing = db.query(User).filter(User.email == user.email).first()
@@ -86,7 +85,6 @@ def signup(user: UserSignup):
 # -----------------------------
 @app.post("/login")
 def login(user: UserLogin):
-
     db = SessionLocal()
 
     db_user = db.query(User).filter(User.email == user.email).first()
@@ -105,7 +103,7 @@ def login(user: UserLogin):
 
 
 # -----------------------------
-# COMMON ML FUNCTION
+# ML PROCESS FUNCTION
 # -----------------------------
 def process_asset(symbol):
 
@@ -117,7 +115,8 @@ def process_asset(symbol):
         threads=False
     )
 
-    if data.empty or len(data) < 20:
+    # ✅ FIXED CONDITION (IMPORTANT)
+    if data.empty:
         return None
 
     data["Return"] = data["Close"].pct_change()
@@ -126,6 +125,10 @@ def process_asset(symbol):
     data["Volatility"] = data["Return"].rolling(5).std()
 
     data = data.dropna()
+
+    # ✅ SAFE CHECK
+    if len(data) < 5:
+        return None
 
     X = data[["MA5","MA10","Volatility","Volume"]]
     y = (data["Return"].shift(-1) > 0).astype(int)
@@ -166,10 +169,7 @@ def top_stocks():
         try:
             data = process_asset(s)
             if data:
-                result.append({
-                    "symbol": s,
-                    **data
-                })
+                result.append({"symbol": s, **data})
         except:
             continue
 
@@ -212,11 +212,7 @@ def ai_predictions():
 
     assets = [
         "AAPL","TSLA","MSFT","NVDA","GOOGL",
-        "AMZN","META","NFLX","AMD","INTC",
-        "JPM","BAC","WMT","DIS","PYPL",
-        "BTC-USD","ETH-USD","SOL-USD","BNB-USD","DOGE-USD",
-        "XRP-USD","ADA-USD","AVAX-USD","DOT-USD",
-        "LTC-USD","LINK-USD","ATOM-USD","TRX-USD"
+        "BTC-USD","ETH-USD","SOL-USD","BNB-USD","XRP-USD"
     ]
 
     result = []
@@ -236,19 +232,32 @@ def ai_predictions():
 
 
 # -----------------------------
-# MARKET OVERVIEW
+# MARKET OVERVIEW (FIXED)
 # -----------------------------
 @app.get("/market-overview")
 def market_overview():
 
-    sp = yf.download("^GSPC", period="2d", interval="1d", progress=False)
+    sp = yf.download("^GSPC", period="5d", interval="1d", progress=False)
 
-    sp_price = round(float(sp["Close"].iloc[-1]), 2)
-    sp_prev = round(float(sp["Close"].iloc[-2]), 2)
+    if sp.empty:
+        return {"error": "No data"}
 
+    close = sp["Close"]
+
+    if hasattr(close.iloc[-1], "__iter__"):
+        sp_price = float(close.iloc[-1].values[0])
+        sp_prev = float(close.iloc[-2].values[0])
+    else:
+        sp_price = float(close.iloc[-1])
+        sp_prev = float(close.iloc[-2])
+
+    sp_price = round(sp_price, 2)
     sp_change = round(((sp_price - sp_prev) / sp_prev) * 100, 2)
 
-    crypto = requests.get("https://api.coingecko.com/api/v3/global").json()
+    crypto = requests.get(
+        "https://api.coingecko.com/api/v3/global",
+        timeout=5
+    ).json()
 
     return {
         "sp500": sp_price,
