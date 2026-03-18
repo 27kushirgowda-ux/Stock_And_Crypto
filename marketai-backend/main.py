@@ -315,34 +315,97 @@ def market_overview():
 @app.get("/asset/{symbol}")
 def get_asset(symbol: str):
 
-    if "-" not in symbol and symbol not in ["AAPL","TSLA","MSFT","NVDA","GOOGL",
+    import yfinance as yf
+    from sklearn.ensemble import RandomForestClassifier
+
+    # -----------------------------
+    # ALL ASSETS
+    # -----------------------------
+    stocks = [
+        "AAPL","TSLA","MSFT","NVDA","GOOGL",
         "AMZN","META","NFLX","AMD","INTC",
-        "JPM","BAC","WMT","DIS","PYPL"]:
-        symbol = symbol + "-USD"
+        "JPM","BAC","WMT","DIS","PYPL"
+    ]
 
-    data = yf.download(symbol, period="1mo", interval="1d", progress=False)
+    cryptos = [
+        "BTC","ETH","SOL","BNB","DOGE",
+        "XRP","ADA","AVAX","DOT","MATIC",
+        "LTC","LINK","ATOM","UNI","TRX"
+    ]
 
-    if data.empty:
-        return {
-            "symbol": symbol.replace("-USD",""),
-            "price": 0,
-            "change": 0,
-            "trend": "No Data",
-            "confidence": 0,
-            "chart": {"dates":[],"prices":[]}
-        }
+    symbol = symbol.upper()
 
-    data["Return"] = data["Close"].pct_change().fillna(0)
+    # -----------------------------
+    # SYMBOL FIX
+    # -----------------------------
+    if symbol in cryptos:
+        yf_symbol = symbol + "-USD"
+    else:
+        yf_symbol = symbol
+
+    # -----------------------------
+    # FETCH DATA
+    # -----------------------------
+    data = yf.download(
+        yf_symbol,
+        period="1mo",
+        interval="1d",
+        progress=False
+    )
+
+    # ❌ NO FALLBACK — REAL ERROR
+    if data.empty or len(data) < 10:
+        return {"error": f"No data available for {symbol}"}
+
+    # -----------------------------
+    # FEATURES
+    # -----------------------------
+    data["Return"] = data["Close"].pct_change()
+    data["MA5"] = data["Close"].rolling(5).mean()
+    data["MA10"] = data["Close"].rolling(10).mean()
+    data["Volatility"] = data["Return"].rolling(5).std()
+
+    data = data.dropna()
+
+    if len(data) < 5:
+        return {"error": f"Insufficient data for {symbol}"}
+
+    X = data[["MA5","MA10","Volatility","Volume"]]
+    y = (data["Return"].shift(-1) > 0).astype(int)
+
+    X = X[:-1]
+    y = y[:-1]
+
+    # -----------------------------
+    # MODEL
+    # -----------------------------
+    model = RandomForestClassifier(n_estimators=10, max_depth=5)
+    model.fit(X, y)
+
+    latest = X.iloc[-1].values.reshape(1,-1)
+
+    pred = model.predict(latest)[0]
+    prob = model.predict_proba(latest)[0].max()
+
+    # -----------------------------
+    # OUTPUT
+    # -----------------------------
+    price = float(data["Close"].iloc[-1])
+    change = float(data["Return"].iloc[-1]) * 100
 
     dates = data.index.strftime("%b-%d").tolist()
-    prices = data["Close"].astype(float).values.tolist()
+    prices = data["Close"].astype(float).tolist()
 
     return {
-        "symbol": symbol.replace("-USD",""),
-        "price": round(float(data["Close"].iloc[-1]),2),
-        "change": round(data["Return"].iloc[-1]*100,2),
-        "trend": "Bullish",
-        "confidence": 75,
+        "symbol": symbol,
+        "price": round(price,2),
+        "change": round(change,2),
+        "open": round(float(data["Open"].iloc[-1]),2),
+        "high": round(float(data["High"].iloc[-1]),2),
+        "low": round(float(data["Low"].iloc[-1]),2),
+        "volume": int(data["Volume"].iloc[-1]),
+        "trend": "Bullish" if pred else "Bearish",
+        "confidence": round(prob*100,2),
         "chart": {
             "dates": dates,
             "prices": prices
