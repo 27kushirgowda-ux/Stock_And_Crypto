@@ -25,12 +25,12 @@ app.add_middleware(
 )
 
 # -----------------------------
-# PASSWORD
+# PASSWORD (FASTER)
 # -----------------------------
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto",
-    bcrypt__rounds=10
+    bcrypt__rounds=8   # faster login/signup
 )
 
 # -----------------------------
@@ -56,7 +56,7 @@ def home():
 
 
 # -----------------------------
-# SIGNUP
+# SIGNUP (FAST)
 # -----------------------------
 @app.post("/signup")
 def signup(user: UserSignup):
@@ -76,12 +76,13 @@ def signup(user: UserSignup):
 
     db.add(new_user)
     db.commit()
+    db.close()
 
     return {"message": "User registered successfully"}
 
 
 # -----------------------------
-# LOGIN
+# LOGIN (FAST)
 # -----------------------------
 @app.post("/login")
 def login(user: UserLogin):
@@ -95,6 +96,8 @@ def login(user: UserLogin):
     if not pwd_context.verify(user.password, db_user.password):
         return {"message": "Invalid password"}
 
+    db.close()
+
     return {
         "message": "Login successful",
         "name": db_user.name,
@@ -103,56 +106,58 @@ def login(user: UserLogin):
 
 
 # -----------------------------
-# ML PROCESS FUNCTION
+# ML FUNCTION (FAST + SAFE)
 # -----------------------------
 def process_asset(symbol):
+    try:
+        data = yf.download(
+            symbol,
+            period="1mo",
+            interval="1d",
+            progress=False,
+            threads=False
+        )
 
-    data = yf.download(
-        symbol,
-        period="3mo",
-        interval="1d",
-        progress=False,
-        threads=False
-    )
+        if data.empty or len(data) < 10:
+            return None
 
-    # ✅ FIXED CONDITION (IMPORTANT)
-    if data.empty:
+        data["Return"] = data["Close"].pct_change()
+        data["MA5"] = data["Close"].rolling(5).mean()
+        data["MA10"] = data["Close"].rolling(10).mean()
+        data["Volatility"] = data["Return"].rolling(5).std()
+
+        data = data.dropna()
+
+        if len(data) < 5:
+            return None
+
+        X = data[["MA5","MA10","Volatility","Volume"]]
+        y = (data["Return"].shift(-1) > 0).astype(int)
+
+        X, y = X[:-1], y[:-1]
+
+        model = RandomForestClassifier(n_estimators=5, max_depth=3)
+        model.fit(X, y)
+
+        latest = X.iloc[-1].values.reshape(1,-1)
+
+        pred = model.predict(latest)[0]
+        prob = model.predict_proba(latest)[0].max()
+
+        return {
+            "price": round(float(data["Close"].iloc[-1]),2),
+            "prediction": "Bullish" if pred else "Bearish",
+            "confidence": round(float(prob)*100,2),
+            "change": round(float(data["Return"].iloc[-1])*100,2)
+        }
+
+    except Exception as e:
+        print("ERROR:", symbol, e)
         return None
-
-    data["Return"] = data["Close"].pct_change()
-    data["MA5"] = data["Close"].rolling(5).mean()
-    data["MA10"] = data["Close"].rolling(10).mean()
-    data["Volatility"] = data["Return"].rolling(5).std()
-
-    data = data.dropna()
-
-    # ✅ SAFE CHECK
-    if len(data) < 5:
-        return None
-
-    X = data[["MA5","MA10","Volatility","Volume"]]
-    y = (data["Return"].shift(-1) > 0).astype(int)
-
-    X, y = X[:-1], y[:-1]
-
-    model = RandomForestClassifier(n_estimators=10, max_depth=5)
-    model.fit(X,y)
-
-    latest = X.iloc[-1].values.reshape(1,-1)
-
-    pred = model.predict(latest)[0]
-    prob = model.predict_proba(latest)[0].max()
-
-    return {
-        "price": round(float(data["Close"].iloc[-1]),2),
-        "prediction": "Bullish" if pred else "Bearish",
-        "confidence": round(prob*100,2),
-        "change": round(data["Return"].iloc[-1]*100,2)
-    }
 
 
 # -----------------------------
-# TOP STOCKS (15)
+# TOP STOCKS (FAST)
 # -----------------------------
 @app.get("/top-stocks")
 def top_stocks():
@@ -166,119 +171,88 @@ def top_stocks():
     result = []
 
     for s in stocks:
-        try:
-            data = process_asset(s)
-            if data:
-                result.append({"symbol": s, **data})
-        except:
-            continue
+        data = process_asset(s)
 
-    # ✅ IF EMPTY → fallback
-    if not result:
-        return [
-            {"symbol":"AAPL","price":180.5,"prediction":"Bullish","confidence":78,"change":1.2},
-            {"symbol":"TSLA","price":240.3,"prediction":"Bearish","confidence":72,"change":-1.5},
-            {"symbol":"MSFT","price":320.1,"prediction":"Bullish","confidence":80,"change":0.9}
-        ]
+        if data:
+            result.append({"symbol": s, **data})
 
-    return sorted(result, key=lambda x: abs(x["change"]), reverse=True)[:5]
+        if len(result) >= 5:   # 🚀 SPEED CONTROL
+            break
+
+    return result
 
 
 # -----------------------------
-# TOP CRYPTO (15)
+# TOP CRYPTO (FAST)
 # -----------------------------
 @app.get("/top-crypto")
 def top_crypto():
 
     cryptos = [
         "BTC-USD","ETH-USD","SOL-USD","BNB-USD","DOGE-USD",
-        "XRP-USD","ADA-USD","AVAX-USD","DOT-USD",
-        "LTC-USD","LINK-USD","ATOM-USD","TRX-USD"
+        "XRP-USD","ADA-USD","AVAX-USD","DOT-USD","MATIC-USD",
+        "LTC-USD","LINK-USD","ATOM-USD","UNI-USD","TRX-USD"
     ]
 
     result = []
 
     for c in cryptos:
-        try:
-            data = process_asset(c)
-            if data:
-                result.append({
-                    "symbol": c.replace("-USD",""),
-                    **data
-                })
-        except:
-            continue
+        data = process_asset(c)
 
-    # ✅ fallback
-    if not result:
-        return [
-            {"symbol":"BTC","price":65000,"prediction":"Bullish","confidence":85,"change":2.1},
-            {"symbol":"ETH","price":3200,"prediction":"Bullish","confidence":80,"change":1.8},
-            {"symbol":"SOL","price":140,"prediction":"Bearish","confidence":70,"change":-2.3}
-        ]
+        if data:
+            result.append({
+                "symbol": c.replace("-USD",""),
+                **data
+            })
 
-    return sorted(result, key=lambda x: abs(x["change"]), reverse=True)[:5]
+        if len(result) >= 5:
+            break
+
+    return result
 
 
 # -----------------------------
-# AI PREDICTIONS
+# AI PREDICTIONS (FAST)
 # -----------------------------
 @app.get("/ai-predictions")
 def ai_predictions():
 
     assets = [
         "AAPL","TSLA","MSFT","NVDA","GOOGL",
+        "AMZN","META","NFLX","AMD","INTC",
         "BTC-USD","ETH-USD","SOL-USD","BNB-USD","XRP-USD"
     ]
 
     result = []
 
     for a in assets:
-        try:
-            data = process_asset(a)
-            if data:
-                result.append({
-                    "symbol": a.replace("-USD",""),
-                    **data
-                })
-        except:
-            continue
+        data = process_asset(a)
 
-    # ✅ fallback
-    if not result:
-        return [
-            {"symbol":"AAPL","price":180,"prediction":"Bullish","confidence":82},
-            {"symbol":"BTC","price":65000,"prediction":"Bullish","confidence":88},
-            {"symbol":"TSLA","price":240,"prediction":"Bearish","confidence":75}
-        ]
+        if data:
+            result.append({
+                "symbol": a.replace("-USD",""),
+                **data
+            })
 
-    return sorted(result, key=lambda x: x["confidence"], reverse=True)[:5]
+        if len(result) >= 5:
+            break
+
+    return result
 
 
 # -----------------------------
-# MARKET OVERVIEW (FIXED)
+# MARKET OVERVIEW
 # -----------------------------
 @app.get("/market-overview")
 def market_overview():
 
-    import yfinance as yf
-    import requests
-
     try:
         sp = yf.download("^GSPC", period="5d", interval="1d", progress=False)
 
-        if sp.empty:
-            raise Exception("No data")
-
         close = sp["Close"]
 
-        # FIX Series issue
-        try:
-            sp_price = float(close.iloc[-1])
-            sp_prev = float(close.iloc[-2])
-        except:
-            sp_price = float(close.iloc[-1].values[0])
-            sp_prev = float(close.iloc[-2].values[0])
+        sp_price = float(close.iloc[-1])
+        sp_prev = float(close.iloc[-2])
 
         sp_price = round(sp_price, 2)
         sp_change = round(((sp_price - sp_prev) / sp_prev) * 100, 2)
@@ -301,65 +275,37 @@ def market_overview():
             "fear_greed_text": "Greed"
         }
 
-    except:
-        # ✅ CLEAN FALLBACK (ONLY HERE)
-        return {
-            "sp500": 5234.56,
-            "sp500_change": 1.24,
-            "crypto_market_cap": 2.45,
-            "crypto_change": 2.18,
-            "fear_greed_value": 72,
-            "fear_greed_text": "Greed"
-        }
+    except Exception as e:
+        return {"error": str(e)}
 
+
+# -----------------------------
+# ASSET DETAILS (MAIN FEATURE)
+# -----------------------------
 @app.get("/asset/{symbol}")
 def get_asset(symbol: str):
 
-    import yfinance as yf
-    from sklearn.ensemble import RandomForestClassifier
-
-    # -----------------------------
-    # ALL ASSETS
-    # -----------------------------
-    stocks = [
-        "AAPL","TSLA","MSFT","NVDA","GOOGL",
-        "AMZN","META","NFLX","AMD","INTC",
-        "JPM","BAC","WMT","DIS","PYPL"
-    ]
-
-    cryptos = [
-        "BTC","ETH","SOL","BNB","DOGE",
-        "XRP","ADA","AVAX","DOT","MATIC",
-        "LTC","LINK","ATOM","UNI","TRX"
-    ]
-
     symbol = symbol.upper()
 
-    # -----------------------------
-    # SYMBOL FIX
-    # -----------------------------
-    if symbol in cryptos:
-        yf_symbol = symbol + "-USD"
-    else:
-        yf_symbol = symbol
+    crypto_list = [
+        "BTC","ETH","SOL","BNB","DOGE","XRP",
+        "ADA","AVAX","DOT","MATIC","LTC",
+        "LINK","ATOM","UNI","TRX"
+    ]
 
-    # -----------------------------
-    # FETCH DATA
-    # -----------------------------
+    yf_symbol = symbol + "-USD" if symbol in crypto_list else symbol
+
     data = yf.download(
         yf_symbol,
         period="1mo",
         interval="1d",
-        progress=False
+        progress=False,
+        threads=False
     )
 
-    # ❌ NO FALLBACK — REAL ERROR
     if data.empty or len(data) < 10:
-        return {"error": f"No data available for {symbol}"}
+        return {"error": f"No data for {symbol}"}
 
-    # -----------------------------
-    # FEATURES
-    # -----------------------------
     data["Return"] = data["Close"].pct_change()
     data["MA5"] = data["Close"].rolling(5).mean()
     data["MA10"] = data["Close"].rolling(10).mean()
@@ -367,19 +313,12 @@ def get_asset(symbol: str):
 
     data = data.dropna()
 
-    if len(data) < 5:
-        return {"error": f"Insufficient data for {symbol}"}
-
     X = data[["MA5","MA10","Volatility","Volume"]]
     y = (data["Return"].shift(-1) > 0).astype(int)
 
-    X = X[:-1]
-    y = y[:-1]
+    X, y = X[:-1], y[:-1]
 
-    # -----------------------------
-    # MODEL
-    # -----------------------------
-    model = RandomForestClassifier(n_estimators=10, max_depth=5)
+    model = RandomForestClassifier(n_estimators=5, max_depth=3)
     model.fit(X, y)
 
     latest = X.iloc[-1].values.reshape(1,-1)
@@ -387,27 +326,18 @@ def get_asset(symbol: str):
     pred = model.predict(latest)[0]
     prob = model.predict_proba(latest)[0].max()
 
-    # -----------------------------
-    # OUTPUT
-    # -----------------------------
-    price = float(data["Close"].iloc[-1])
-    change = float(data["Return"].iloc[-1]) * 100
-
-    dates = data.index.strftime("%b-%d").tolist()
-    prices = data["Close"].astype(float).tolist()
-
     return {
         "symbol": symbol,
-        "price": round(price,2),
-        "change": round(change,2),
+        "price": round(float(data["Close"].iloc[-1]),2),
+        "change": round(float(data["Return"].iloc[-1])*100,2),
         "open": round(float(data["Open"].iloc[-1]),2),
         "high": round(float(data["High"].iloc[-1]),2),
         "low": round(float(data["Low"].iloc[-1]),2),
         "volume": int(data["Volume"].iloc[-1]),
         "trend": "Bullish" if pred else "Bearish",
-        "confidence": round(prob*100,2),
+        "confidence": round(float(prob)*100,2),
         "chart": {
-            "dates": dates,
-            "prices": prices
+            "dates": data.index.strftime("%b-%d").tolist(),
+            "prices": data["Close"].astype(float).tolist()
         }
     }
