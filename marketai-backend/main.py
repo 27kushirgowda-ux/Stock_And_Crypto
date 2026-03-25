@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import yfinance as yf
 from sklearn.ensemble import RandomForestClassifier
 import requests
+import time
 
 from database import engine, Base, SessionLocal
 from models import User
@@ -176,6 +177,8 @@ def top_stocks():
         if data:
             result.append({"symbol": s, **data})
 
+            time.sleep(0.5)  # small delay to prevent API overload
+
         if len(result) >= 5:   # 🚀 SPEED CONTROL
             break
 
@@ -205,6 +208,8 @@ def top_crypto():
                 **data
             })
 
+            time.sleep(0.5)  # small delay to prevent API overload
+
         if len(result) >= 5:
             break
 
@@ -233,6 +238,8 @@ def ai_predictions():
                 "symbol": a.replace("-USD",""),
                 **data
             })
+
+            time.sleep(0.5)  # small delay to prevent API overload
 
         if len(result) >= 5:
             break
