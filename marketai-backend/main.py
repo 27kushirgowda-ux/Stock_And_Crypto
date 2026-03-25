@@ -348,3 +348,18 @@ def get_asset(symbol: str):
             "prices": data["Close"].astype(float).tolist()
         }
     }
+
+@app.get("/test-yahoo")
+def test_yahoo():
+    import yfinance as yf
+
+    data = yf.download("AAPL", period="5d", interval="1d")
+
+    if data.empty:
+        return {"status": "FAILED", "reason": "Yahoo not working"}
+
+    return {
+        "status": "SUCCESS",
+        "rows": len(data),
+        "price": float(data["Close"].iloc[-1])
+    }
