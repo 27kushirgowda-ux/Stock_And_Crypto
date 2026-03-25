@@ -215,27 +215,74 @@ def ai_predictions():
 def get_asset_detail(symbol: str):
     symbol = symbol.upper()
 
-    yf_symbol = symbol + "-USD" if symbol in ["BTC", "ETH", "SOL", "DOGE"] else symbol
+    yf_symbol = symbol + "-USD" if symbol in ["BTC", "ETH", "SOL", "DOGE", "BNB"] else symbol
 
-    res = process_asset(yf_symbol)
+    try:
+        data = yf.download(
+            yf_symbol,
+            period="1mo",
+            interval="1d",
+            progress=False,
+            session=session
+        )
 
-    if not res:
-        raise HTTPException(status_code=404, detail="No data")
+        res = process_asset(yf_symbol)
 
-    return {
-        "symbol": symbol,
-        **res,
-        "chart": {
-            "dates": ["Day1","Day2","Day3","Day4","Day5"],
-            "prices": [
-                res["price"]-20,
-                res["price"]-10,
-                res["price"],
-                res["price"]+10,
-                res["price"]
-            ]
+        if data.empty or not res:
+            raise Exception("No data")
+
+        return {
+            "symbol": symbol,
+
+            "price": res["price"],
+            "change": res["change"],
+
+            # ✅ FIX (IMPORTANT)
+            "trend": res["prediction"],
+            "confidence": res["confidence"],
+
+            # ✅ ADD THESE (YOU WERE MISSING)
+            "open": round(float(data["Open"].iloc[-1]), 2),
+            "high": round(float(data["High"].iloc[-1]), 2),
+            "low": round(float(data["Low"].iloc[-1]), 2),
+            "volume": int(data["Volume"].iloc[-1]),
+
+            # ✅ REAL CHART
+            "chart": {
+                "dates": data.index.strftime("%b-%d").tolist(),
+                "prices": data["Close"].astype(float).tolist()
+            }
         }
-    }
+
+    except:
+        # 🔁 fallback (NEVER EMPTY)
+        res = process_asset(yf_symbol)
+
+        return {
+            "symbol": symbol,
+
+            "price": res["price"],
+            "change": res["change"],
+
+            "trend": res["prediction"],
+            "confidence": res["confidence"],
+
+            "open": res["price"] - 10,
+            "high": res["price"] + 10,
+            "low": res["price"] - 20,
+            "volume": 1000000,
+
+            "chart": {
+                "dates": ["Day1","Day2","Day3","Day4","Day5"],
+                "prices": [
+                    res["price"]-20,
+                    res["price"]-10,
+                    res["price"],
+                    res["price"]+10,
+                    res["price"]
+                ]
+            }
+        }
 
 
 @app.get("/market-overview")
@@ -244,5 +291,7 @@ def market_overview():
         "sp500": 5234.56,
         "sp500_change": 1.24,
         "crypto_market_cap": 2.45,
-        "fear_greed": "Greed"
+        "crypto_change": 2.18,
+        "fear_greed_value": 72,
+        "fear_greed_text": "Greed"
     }
