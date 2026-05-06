@@ -5,19 +5,40 @@ import os
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# ✅ If not on  → use SQLite locally
+# ✅ Local SQLite fallback
 if not DATABASE_URL:
     DATABASE_URL = "sqlite:///./users.db"
 
-# ⚠️ Fix for PostgreSQL 
+# ✅ Fix postgres URL
 if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://")
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgres://",
+        "postgresql://",
+        1
+    )
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+# ✅ SQLite (Local)
+if "sqlite" in DATABASE_URL:
+
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
+
+# ✅ PostgreSQL (Render)
+else:
+
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        connect_args={"sslmode": "require"}
+    )
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
 )
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
